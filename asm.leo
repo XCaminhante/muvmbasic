@@ -6,7 +6,9 @@
 <preferences/>
 <find_panel_settings/>
 <vnodes>
-<v t="caminhante.20220906181437.1"><vh>mu0asm</vh></v>
+<v t="caminhante.20220906181437.1"><vh>mu0asm</vh>
+<v t="caminhante.20220906183805.1"><vh>@file muasm.c</vh></v>
+</v>
 </vnodes>
 <tnodes>
 <t tx="caminhante.20220906181437.1"></t>
