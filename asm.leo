@@ -19,7 +19,17 @@ CFLAGS := -std=gnu99 -Wall -Werror -Wno-unused-function -Wfatal-errors -Os
 .PHONY: all
 all: muasm
 
-muasm: muasm.c
-	gcc $(CFLAGS) $&lt; -o $@</t>
+.PHONY: test
+test: muasm-test
+
+%: %.c
+	gcc $(CFLAGS) "$&lt;" -o "$@"
+
+%-test: %.c
+	gcc $(CFLAGS) -D DEBUG "$&lt;" -o "$@"
+
+.PHONY: clean
+clean:
+	@rm -fv muasm muasm.o muasm-test muasm-test.o</t>
 </tnodes>
 </leo_file>
