@@ -24,12 +24,21 @@
   "Optional settings (must appear at the right order):\n" \
   " -m\tset the limit of entries for the symbol table\n" \
   " -D\tdefines symbols, one pair of '-D name=value' for each"
+//@+node:caminhante.20220909191047.1: ** debug_msg
+#ifdef DEBUG
+  #define debug_msg(MSG,ARGS...) \
+    fprintf(stderr,"#%s: " MSG,__func__,##ARGS)
+#else
+  #define debug_msg(MSG,ARGS...)
+#endif
 //@+node:caminhante.20220908213955.1: ** /types
 typedef uint64_t natural;
 #define alloc(SIZE,TYPE) \
   (TYPE*) calloc (SIZE, sizeof(TYPE))
 #define salloc(SIZE) \
   alloc(SIZE+1,char)
+#define free(POINTER) \
+  free((void*) POINTER)
 //@+others
 //@+node:caminhante.20220909185249.1: *3* typedef string
 typedef const char * string;
@@ -37,7 +46,31 @@ typedef const char * string;
 //@+node:caminhante.20220908214839.1: *4* str_is_equal
 // [ duas strings C binariamente idênticas -> true | false ]
 bool str_is_equal (string s1, string s2) {
+  if (!s1 || !s2) { return false; }
   return strcmp(s1,s2) == 0;
+}
+//@+node:caminhante.20220911222419.1: *4* str_starts_with
+// [ a primeira string inicia-se com o conteúdo da segunda string (o prefixo) -> true | false ]
+bool str_starts_with (string str, string prefix) {
+  if (!str || !prefix) { return false; }
+  natural slen = strlen(str), plen = strlen(prefix);
+  debug_msg("str len: %lu, prefix len: %lu\n",slen,plen);
+  // se o tamanho das strings for insuficiente, falha:
+  if (slen < 2 || plen < 1) { return false; }
+  // se o prefixo tiver tamanho maior que a string, falha:
+  if (plen > slen) { return false; }
+  return strncmp(str,prefix,plen) == 0;
+}
+//@+node:caminhante.20220911223247.1: *4* str_ends_with
+// [ a primeira string termina com o conteúdo da segunda string (o sufixo) -> true | false ]
+bool str_ends_with (string str, string suffix) {
+  if (!str || !suffix) { return false; }
+  natural s1len = strlen(str), s2len = strlen(suffix);
+  // se o tamanho das strings for insuficiente, falha:
+  if (s1len < 2 || s2len < 1) { return false; }
+  // se o sufixo tiver tamanho maior que a string, falha:
+  if (s2len > s1len) { return false; }
+  return strncmp(str+s1len-s2len,suffix,s2len) == 0;
 }
 //@+node:caminhante.20220909174114.1: *4* str_copy
 // [ string válida -> cópia | NULL ]
@@ -48,6 +81,17 @@ string str_copy (string str) {
   if (l == 0) { return NULL; }
   char *s = salloc(l);
   return strncpy(s,str,l);
+}
+//@+node:caminhante.20220911215910.1: *4* str_concat
+// [ duas strings -> primeira string realocada, com conteúdo da segunda adicionado ao final | NULL ]
+string str_concat (string str, string append) {
+  if (!str || !append) { return NULL; }
+  natural slen = strlen(str), alen = strlen(append);
+  if (slen+alen < 1) { return NULL; }
+  string nstr = realloc((char*)str,slen+alen+1);
+  if (!nstr) { return NULL; }
+  strncpy((char*)nstr+slen,append,alen);
+  return nstr;
 }
 //@+node:caminhante.20220908221947.1: *4* str_first_substring
 //@+at
@@ -81,13 +125,6 @@ string str_last_substring (string s, char* cut) {
   return ns;
 }
 //@-others
-//@+node:caminhante.20220909191047.1: *3* debug_msg
-#ifdef DEBUG
-  #define debug_msg(MSG,ARGS...) \
-    fprintf(stderr,"#%s: " MSG,__func__,##ARGS)
-#else
-  #define debug_msg(MSG,ARGS...)
-#endif
 //@+node:caminhante.20220909164546.1: *3* struct symbol_table
 struct symbol_entry { string key; string value; };
 struct symbol_table { natural capacity; natural used; struct symbol_entry *symbols; };
@@ -198,7 +235,7 @@ bool symbol_table_insert (struct symbol_entry symbol) {
     // liberar memória do valor anterior:
     //NOTE o ponteiro abaixo só pode ser inválido em caso de erro de programação ou corrupção de memória
     debug_msg("s[i-1].value (must be != nil): %p\n", (void*)s[i-1].value);
-    free( (char*) s[i-1].value);
+    free(s[i-1].value);
   // se a chave não foi encontrada, inserir símbolo em nova entrada na tabela (desde que haja espaço livre):
   } else {
     // se não houver espaço livre, falha:
@@ -235,7 +272,7 @@ bool symbol_table_delete (string key) {
   //NOTE os ponteiros abaixo só podem ser inválidos em caso de erro de programação ou corrupção de memória
   debug_msg("s[i-1].key (must be != nil): %p\n",s[i-1].key);
   debug_msg("s[i-1].value (must be != nil): %p\n",s[i-1].value);
-  free( (char*) s[i-1].key); free( (char*) s[i-1].value);
+  free(s[i-1].key); free(s[i-1].value);
   s[i-1].key = 0; s[i-1].value = 0;
   // decrementar contador de entradas usadas:
   debug_msg("symbol_table.used (must be >0): %lu\n",symbol_table.used);
@@ -304,15 +341,76 @@ bool define_symbol (string arg) {
   // se a inserção na tabela falhar, falha:
   struct symbol_entry s = {key,value};
   if (!symbol_table_insert(s)) { return false; }
+  free(key); free(value);
   return true;
 }
 //@+node:caminhante.20220906192428.1: *3* compile_file
+//@+others
+//@+node:caminhante.20220911234346.1: *4* file_output_path
+// [ caminho do arquivo de entrada -> caminho do arquivo de saída | NULL ]
+string file_output_path (string input_path) {
+  // obter nome do arquivo sem extensão, para adicionar a extensão nova:
+  char *dot = strrchr(input_path,'.');
+  string basename;
+  // caso o caractere seja o primeiro da string, ignorar dot:
+  if (dot == input_path) { dot = NULL; }
+  // caso o início do nome do arquivo seja '..' e dot aponte para o segundo caractere, ignorar dot:
+  if (str_starts_with(input_path,"..") && dot == input_path+1) { dot = NULL; }
+  if (!dot) {
+    debug_msg("no dot case\n");
+    // caso o caractere '.' não seja encontrado, considerar o nome tal como está:
+    basename = str_copy(input_path);
+  } else {
+    debug_msg("dot case\n");
+    // se encontrado, extrair o conteúdo antes do caractere '.':
+    basename = str_first_substring(input_path, dot);
+  }
+  debug_msg("basename: %p\n",(void*)basename);
+  // se a alocação de string falhar, falha:
+  if (!basename) { return NULL; }
+  debug_msg("basename '%s'\n",basename);
+  // concatene a nova extensão na base do nome do arquivo
+  string output_path = str_concat(basename,".exe");
+  // se a realocação da concatenação falhar, falha:
+  if (!output_path) { return NULL; }
+  return output_path;
+}
+//@-others
 //@+at
 // [ caminho válido para um arquivo contendo assembly muvm ->
 //   resultado compilado em outro arquivo na mesma pasta, true |
 //   false ]
 //@@c
-bool compile_file (string arg) {
+bool compile_file (string file_input) {
+  debug_msg("file input: '%s'\n",file_input);
+  string file_output = file_output_path(file_input);
+  if (!file_output) { return false; }
+  debug_msg("file output: '%s'\n",file_output);
+  // preparar acessos de arquivos de entrada e saída:
+  FILE* input = fopen(file_input, "r");
+  if (!input) { return false; }
+  FILE* output = fopen(file_output, "w");
+  if (!output) { return false; }
+  // obter o tamanho do arquivo para alocar o espaço do código-fonte:
+  fseek(input, 0, SEEK_END);
+  natural input_len = ftell(input);
+  fseek(input, 0, SEEK_SET);
+  // se o arquivo estiver vazio, remova o arquivo de saída e ignore o passo de compilação:
+  if (input_len == 0) { remove(file_output); goto end; }
+  // alocar e ler o código-fonte de uma só vez para a memória:
+  string source = salloc(input_len);
+  if (!source) { return false; }
+  natural actual_read = fread(source, 1, input_len, input);
+  // se a leitura for interrompida, falha:
+  if (actual_read != input_len) { return false; }
+  source[input_len] = '\0';
+  // passar pelo ciclo de compilação:
+  //TODO
+  // enviar resultado para arquivo de saída:
+  //TODO
+  end:
+  fclose(input); fclose(output);
+  free(file_output);
   return true;
 }
 //@+node:caminhante.20220909163746.1: *3* tests
@@ -347,8 +445,7 @@ int main (int argc, char *argv[]) {
     //NOTE mas isso não parece muito importante porque a alocação da tabela falha conforme esperado
     //NOTE para impor um formato numérico seria preciso usar outro parser
     if (table_size == 0 || (parse_end < argv[arg+1] + strlen(argv[arg+1]) )) { failure("Error: -m argument parsing failed"); }
-    arg++;
-  }
+    arg++; }
   // se a alocação da tabela de símbolos falhar, falha:
   debug_msg("table_size: %lu\n",table_size);
   if (!symbol_table_initialize(table_size)) { failure("Could not allocate memory for the symbol table"); }
@@ -359,14 +456,19 @@ int main (int argc, char *argv[]) {
     if (arg+1 >= argc) { failure("Required: one argument for -D switch"); }
     // se o parsing do argumento seguinte falhar, falha:
     if (!define_symbol( argv[arg+1] )) { failure("Error: symbol definition parsing failed"); }
-    arg += 2;
-  }
+    arg += 2; }
   // [ um ou mais arquivos válidos -> arquivos compilados | falha ]
   // se não houver mais argumentos, mensagem e encerramento:
-  if (arg == argc) { failure("Required: one or more files to compile"); }
   debug_msg("arg: %lu\n",arg);
-  // para iterar os arquivos:
-  //TODO iterar os arquivos
+  if (arg == argc) { failure("Required: one or more files to compile"); }
+  // para cada arquivo:
+  debug_msg("iterating files:\n");
+  for (;arg < argc; arg++) {
+    // se o arquivo não existir, falha:
+    if (access(argv[arg], F_OK) != 0) { failure("Error: file is not accessible"); }
+    // se ocorrer falha ao compilar o arquivo, falha:
+    if (!compile_file(argv[arg])) { failure("Error: file could not be compiled"); }
+  }
 #ifdef DEBUG
   tests();
 #endif
